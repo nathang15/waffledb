@@ -23,6 +23,20 @@ int main(int argc, char* argv[]) {
     ;
     auto result = options.parse(argc, argv);
 
+    if (result.count("d") == 1) {
+        if (result.count("n") == 0) {
+            cout << "You must specify a db name with -n <name>" << endl;
+            printUsage();
+            return 1;
+        }
+
+        // Destroy database
+        std::string dbname(result["n"].as<std::string>());
+        Database db(CppDB::loadDB(dbname));
+        db.destroy();
+        return 0;
+    }
+
     if (result.count("c") == 1) {
         if (result.count("n") == 0) {
             cout << "You must specify a db name with -n <name>" << endl;

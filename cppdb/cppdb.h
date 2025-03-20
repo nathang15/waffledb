@@ -10,6 +10,7 @@ public:
     CppDB();
 
     static Database createEmptyDB(std::string& dbname);
+    static Database loadDB(std::string& dbname);
 };
 
 #endif // CPPDB_H

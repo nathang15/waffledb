@@ -1,5 +1,5 @@
 /build
-
+*.json
 # C++ objects and libs
 *.slo
 *.lo

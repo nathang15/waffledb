@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 
 add_executable(cppdb-tests
 	dbmanagement-tests.cpp
+	keyvalue-tests.cpp
 )
 
 include_directories(${cppdb_SOURCE_DIR})

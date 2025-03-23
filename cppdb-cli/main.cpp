@@ -3,28 +3,25 @@
 #include "cppdb.h"
 
 using namespace std;
+using namespace cppdb;
 
 cxxopts::Options options("waffledb-cli", "CLI for WaffleDB");
 
-void printUsage() {
+void printUsage()
+{
     cout << "Error!" << std::endl;
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[])
+{
     // Grab command line params and determine mode
-    options.add_options()
-    ("c,create", "Create a DB")
-    ("d,destroy", "Destroy a DB")
-    ("s,set", "Set a key in a DB")
-    ("g,get", "Get a value from key in a DB")
-    ("n,name", "Database name (required)", cxxopts::value<std::string>())
-    ("k,key", "Key to set/get", cxxopts::value<std::string>())
-    ("v,value", "Value to set", cxxopts::value<std::string>())
-    ;
+    options.add_options()("c,create", "Create a DB")("d,destroy", "Destroy a DB")("s,set", "Set a key in a DB")("g,get", "Get a value from key in a DB")("n,name", "Database name (required)", cxxopts::value<std::string>())("k,key", "Key to set/get", cxxopts::value<std::string>())("v,value", "Value to set", cxxopts::value<std::string>());
     auto result = options.parse(argc, argv);
 
-    if (result.count("d") == 1) {
-        if (result.count("n") == 0) {
+    if (result.count("d") == 1)
+    {
+        if (result.count("n") == 0)
+        {
             cout << "You must specify a db name with -n <name>" << endl;
             printUsage();
             return 1;
@@ -32,13 +29,15 @@ int main(int argc, char* argv[]) {
 
         // Destroy database
         std::string dbname(result["n"].as<std::string>());
-        Database db(CppDB::loadDB(dbname));
-        db.destroy();
+        std::unique_ptr<cppdb::IDatabase> db(CppDB::loadDB(dbname));
+        db->destroy();
         return 0;
     }
 
-    if (result.count("c") == 1) {
-        if (result.count("n") == 0) {
+    if (result.count("c") == 1)
+    {
+        if (result.count("n") == 0)
+        {
             cout << "You must specify a db name with -n <name>" << endl;
             printUsage();
             return 1;
@@ -46,24 +45,28 @@ int main(int argc, char* argv[]) {
 
         // create database
         std::string dbname(result["n"].as<std::string>());
-        Database db(CppDB::createEmptyDB(dbname));
+        std::unique_ptr<cppdb::IDatabase> db(CppDB::createEmptyDB(dbname));
         return 0;
     }
 
-    if (result.count("s") == 1) {
-        if (result.count("n") == 0) {
+    if (result.count("s") == 1)
+    {
+        if (result.count("n") == 0)
+        {
             cout << "You must specify a db name with -n <name>" << endl;
             printUsage();
             return 1;
         }
 
-        if (result.count("k") == 0) {
+        if (result.count("k") == 0)
+        {
             cout << "You must specify a key to set with -k <name>" << endl;
             printUsage();
             return 1;
         }
 
-        if (result.count("v") == 0) {
+        if (result.count("v") == 0)
+        {
             cout << "You must specify a value to set with -v <value>" << endl;
             printUsage();
             return 1;
@@ -73,19 +76,22 @@ int main(int argc, char* argv[]) {
         std::string dbname(result["n"].as<std::string>());
         std::string k(result["k"].as<std::string>());
         std::string v(result["v"].as<std::string>());
-        Database db(CppDB::loadDB(dbname));
-        db.setKeyValue(k, v);
+        std::unique_ptr<cppdb::IDatabase> db(CppDB::loadDB(dbname));
+        db->setKeyValue(k, v);
         return 0;
     }
 
-    if (result.count("g") == 1) {
-        if (result.count("n") == 0) {
+    if (result.count("g") == 1)
+    {
+        if (result.count("n") == 0)
+        {
             cout << "You must specify a db name with -n <name>" << endl;
             printUsage();
             return 1;
         }
 
-        if (result.count("k") == 0) {
+        if (result.count("k") == 0)
+        {
             cout << "You must specify a key to set with -k <name>" << endl;
             printUsage();
             return 1;
@@ -94,8 +100,8 @@ int main(int argc, char* argv[]) {
         // Get key value
         std::string dbname(result["n"].as<std::string>());
         std::string k(result["k"].as<std::string>());
-        Database db(CppDB::loadDB(dbname));
-        cout << db.getKeyValue(k) << endl;
+        std::unique_ptr<cppdb::IDatabase> db(CppDB::loadDB(dbname));
+        cout << db->getKeyValue(k) << endl;
         return 0;
     }
 

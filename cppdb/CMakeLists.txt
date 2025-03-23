@@ -5,45 +5,34 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(GNUInstallDirs)
 
 set(HEADERS 
-    cppdb.h
-    database.h
+    include/cppdb.h
+    include/database.h
 )
 
 add_library(cppdb STATIC
     ${HEADERS}
-    cppdb.cpp
-    database.cpp
+    src/cppdb.cpp
+    src/database.cpp
 )
 
-# Set public headers for installation
 set_target_properties(cppdb PROPERTIES PUBLIC_HEADER "${HEADERS}")
 
-# Configure include directories for build and install
 target_include_directories(cppdb 
     PUBLIC 
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 
-# Platform-specific compiler and linker flags
 if(MSVC)
-    # MSVC-specific compiler options
-    target_compile_options(cppdb PRIVATE /W4)
-    
-    # Define WINDOWS macro
+    target_compile_options(cppdb PRIVATE /W4)  
     target_compile_definitions(cppdb PRIVATE WIN32 _WINDOWS)
 else()
-    # GCC/Clang compiler options
     target_compile_options(cppdb PRIVATE -Wall -Wextra)
-    
-    # Link with filesystem library for GCC on Linux
     if(NOT APPLE)
         target_link_libraries(cppdb PRIVATE stdc++fs)
     endif()
 endif()
 
-# Install targets
 install(TARGETS cppdb 
     EXPORT cppdb
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <unordered_map>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -27,11 +28,34 @@ public:
 private:
     std::string m_name;
     std::string m_fullpath;
+    std::unordered_map<std::string, std::string> m_keyValueStore;
 };
 
 EmbeddedDatabase::Impl::Impl(std::string dbname, std::string fullpath) : m_name(dbname), m_fullpath(fullpath)
 {
-    ;
+    for (auto &p : fs::directory_iterator(getDirectory()))
+    {
+        if (p.exists() && p.is_regular_file())
+        {
+            // check if extension if .kv
+            // If so, open file
+            if (".kv" == p.path().extension())
+            {
+                std::string keyWithString = p.path().filename().string();
+                std::string key = keyWithString.substr(0, keyWithString.length() - 10); // ASSUMPTION, fix later
+                std::ifstream t(p.path());
+                std::string value;
+
+                t.seekg(0, std::ios::end);
+                value.reserve(t.tellg());
+                t.seekg(0, std::ios::beg);
+
+                value.assign((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+
+                m_keyValueStore.insert({key, value});
+            }
+        }
+    }
 }
 
 EmbeddedDatabase::Impl::~Impl()
@@ -71,6 +95,8 @@ void EmbeddedDatabase::Impl::destroy()
     {
         fs::remove_all(m_fullpath);
     }
+
+    m_keyValueStore.clear();
 }
 
 // Instance users function
@@ -86,19 +112,26 @@ void EmbeddedDatabase::Impl::setKeyValue(std::string key, std::string value)
     os.open(m_fullpath + "/" + key + "_string.kv", std::ios::out | std::ios::trunc);
     os << value;
     os.close();
+    m_keyValueStore.insert({key, value});
 }
 
 std::string EmbeddedDatabase::Impl::getKeyValue(std::string key)
 {
-    std::ifstream t(m_fullpath + "/" + key + "_string.kv");
-    std::string value;
+    // std::ifstream t(m_fullpath + "/" + key + "_string.kv");
+    // std::string value;
 
-    t.seekg(0, std::ios::end);
-    value.reserve(t.tellg());
-    t.seekg(0, std::ios::beg);
+    // t.seekg(0, std::ios::end);
+    // value.reserve(t.tellg());
+    // t.seekg(0, std::ios::beg);
 
-    value.assign((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
-    return value;
+    // value.assign((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+    // return value;
+    const auto &value = m_keyValueStore.find(key);
+    if (value == m_keyValueStore.end())
+    {
+        return ""; // DANGER: Should be not found (error handling here)
+    }
+    return value->second;
 }
 
 // High Level Database Client API

@@ -1,13 +1,13 @@
 #include "catch.hpp"
 
-#include "cppdb.h"
+#include "waffledb.h"
 
 TEST_CASE("Store and retrieve a value", "[setKeyValue, getKeyValue]")
 {
     SECTION("Base set and get")
     {
         std::string dbname("myemptydb");
-        std::unique_ptr<cppdb::IDatabase> db(cppdb::CppDB::createEmptyDB(dbname));
+        std::unique_ptr<waffledb::IDatabase> db(waffledb::WaffleDB::createEmptyDB(dbname));
 
         std::string key("simplestring");
         std::string value("some simplevalue");

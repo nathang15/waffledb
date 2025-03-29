@@ -1,16 +1,16 @@
-#ifndef CPPDB_H
-#define CPPDB_H
+#ifndef WAFFLEDB_H
+#define WAFFLEDB_H
 
 #include <string>
 #include "database.h"
 
-namespace cppdb
+namespace waffledb
 {
 
-    class CppDB
+    class WaffleDB
     {
     public:
-        CppDB();
+        WaffleDB();
 
         static std::unique_ptr<IDatabase> createEmptyDB(std::string &dbname);
         static std::unique_ptr<IDatabase> loadDB(std::string &dbname);
@@ -18,4 +18,4 @@ namespace cppdb
 
 }
 
-#endif // CPPDB_H
+#endif // WAFFLEDB_H

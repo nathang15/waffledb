@@ -3,9 +3,9 @@
 
 #include "database.h"
 
-namespace cppdbext
+namespace waffledbext
 {
-    using namespace cppdb;
+    using namespace waffledb;
 
     class EmbeddedDatabase : public IDatabase
     {

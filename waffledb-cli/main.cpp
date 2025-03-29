@@ -1,9 +1,9 @@
 #include <iostream>
 #include "cxxopts.hpp"
-#include "cppdb.h"
+#include "waffledb.h"
 
 using namespace std;
-using namespace cppdb;
+using namespace waffledb;
 
 cxxopts::Options options("waffledb-cli", "CLI for WaffleDB");
 
@@ -29,7 +29,7 @@ int main(int argc, char *argv[])
 
         // Destroy database
         std::string dbname(result["n"].as<std::string>());
-        std::unique_ptr<cppdb::IDatabase> db(CppDB::loadDB(dbname));
+        std::unique_ptr<waffledb::IDatabase> db(WaffleDB::loadDB(dbname));
         db->destroy();
         return 0;
     }
@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
 
         // create database
         std::string dbname(result["n"].as<std::string>());
-        std::unique_ptr<cppdb::IDatabase> db(CppDB::createEmptyDB(dbname));
+        std::unique_ptr<waffledb::IDatabase> db(WaffleDB::createEmptyDB(dbname));
         return 0;
     }
 
@@ -76,7 +76,7 @@ int main(int argc, char *argv[])
         std::string dbname(result["n"].as<std::string>());
         std::string k(result["k"].as<std::string>());
         std::string v(result["v"].as<std::string>());
-        std::unique_ptr<cppdb::IDatabase> db(CppDB::loadDB(dbname));
+        std::unique_ptr<waffledb::IDatabase> db(WaffleDB::loadDB(dbname));
         db->setKeyValue(k, v);
         return 0;
     }
@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
         // Get key value
         std::string dbname(result["n"].as<std::string>());
         std::string k(result["k"].as<std::string>());
-        std::unique_ptr<cppdb::IDatabase> db(CppDB::loadDB(dbname));
+        std::unique_ptr<waffledb::IDatabase> db(WaffleDB::loadDB(dbname));
         cout << db->getKeyValue(k) << endl;
         return 0;
     }

@@ -4,7 +4,7 @@
 #include <string>
 #include <memory>
 
-namespace cppdb
+namespace waffledb
 {
     class IDatabase
     {

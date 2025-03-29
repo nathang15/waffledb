@@ -7,8 +7,8 @@
 #include <filesystem>
 
 namespace fs = std::filesystem;
-using namespace cppdb;
-using namespace cppdbext;
+using namespace waffledb;
+using namespace waffledbext;
 
 class EmbeddedDatabase::Impl : public IDatabase
 {

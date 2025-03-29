@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.14)
 add_executable(waffledb-tests
 	dbmanagement-tests.cpp
 	keyvalue-tests.cpp
+	performance-tests.cpp
 )
 
 include_directories(${waffledb_SOURCE_DIR})

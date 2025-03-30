@@ -17,6 +17,24 @@ namespace waffledbext
         void setKeyValue(std::string key, std::string value);
         std::string getKeyValue(std::string key);
 
+        void write(const TimePoint &point);
+
+        void writeBatch(const std::vector<TimePoint> &points);
+
+        std::vector<TimePoint> query(const std::string &metric, uint64_t start_time, uint64_t end_time, const std::unordered_map<std::string, std::string> &tags);
+
+        double avg(const std::string &metric, uint64_t start_time, uint64_t end_time, const std::unordered_map<std::string, std::string> &tags);
+
+        double sum(const std::string &metric, uint64_t start_time, uint64_t end_time, const std::unordered_map<std::string, std::string> &tags);
+
+        double min(const std::string &metric, uint64_t start_time, uint64_t end_time, const std::unordered_map<std::string, std::string> &tags);
+
+        double max(const std::string &metric, uint64_t start_time, uint64_t end_time, const std::unordered_map<std::string, std::string> &tags);
+
+        std::vector<std::string> getMetrics();
+
+        void deleteMetric(const std::string &metric);
+
         // management functions
         static const std::unique_ptr<IDatabase> createEmpty(std::string dbname);
         static const std::unique_ptr<IDatabase> load(std::string dbname);

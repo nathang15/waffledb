@@ -33,12 +33,8 @@ namespace waffledb
         IDatabase() = default;
         virtual ~IDatabase() = default;
 
-        // Key-Value operations
+        // Operations
         virtual std::string getDirectory(void) = 0;
-        virtual void setKeyValue(std::string key, std::string value) = 0;
-        virtual std::string getKeyValue(std::string key) = 0;
-
-        // Time Series operations
         virtual void write(const TimePoint &point) = 0;
         virtual void writeBatch(const std::vector<TimePoint> &points) = 0;
         virtual std::vector<TimePoint> query(

@@ -169,7 +169,6 @@ namespace
     std::string sanitizeKeyForFilename(const std::string &key)
     {
         std::string result = key;
-        // Replace invalid characters with underscores
         for (char &c : result)
         {
             if (c == ':' || c == '<' || c == '>' || c == '"' || c == '/' ||
@@ -180,7 +179,6 @@ namespace
         }
         return result;
     }
-
 }
 
 class EmbeddedDatabase::Impl : public IDatabase
@@ -190,12 +188,8 @@ public:
 
     ~Impl();
 
-    // Key-value operations
-    std::string getDirectory(void);
-    void setKeyValue(std::string key, std::string value);
-    std::string getKeyValue(std::string key);
-
     // Timeseries operations
+    std::string getDirectory(void);
     void write(const TimePoint &point);
     void writeBatch(const std::vector<TimePoint> &points);
     std::vector<TimePoint> query(
@@ -234,10 +228,12 @@ public:
 private:
     std::string m_name;
     std::string m_fullpath;
-    std::unordered_map<std::string, std::string> m_keyValueStore;
+    std::unordered_map<std::string, std::string> m_timeSeriesStore;
     std::unordered_set<std::string> m_metrics;
 
     void saveMetrics();
+    void saveTimeSeries(const std::string &seriesKey, const std::string &serializedData);
+    std::string loadTimeSeries(const std::string &seriesKey);
 };
 
 EmbeddedDatabase::Impl::Impl(std::string dbname, std::string fullpath)
@@ -251,74 +247,52 @@ EmbeddedDatabase::Impl::Impl(std::string dbname, std::string fullpath)
             return;
         }
 
-        std::unordered_map<std::string, std::string> fileToKeyMap;
-        std::vector<std::string> knownKeys = {
-            "ts:metrics"};
-
-        for (const auto &key : knownKeys)
-        {
-            fileToKeyMap[sanitizeKeyForFilename(key) + "_string.kv"] = key;
-        }
-
+        // Load metrics list
         for (const auto &entry : fs::directory_iterator(fullpath))
         {
-            if (entry.is_regular_file() && entry.path().extension() == ".kv")
+            if (entry.is_regular_file() && entry.path().extension() == ".ts")
             {
                 std::string filename = entry.path().filename().string();
-
-                // Try to determine the original key
-                std::string key;
-                if (filename.length() > 10 && filename.substr(filename.length() - 10) == "_string.kv")
+                if (filename == "metrics.ts")
                 {
-                    std::string filePrefix = filename.substr(0, filename.length() - 10);
-                    // Check if it's a known key
-                    if (fileToKeyMap.find(filename) != fileToKeyMap.end())
+                    // Read the metrics file
+                    std::ifstream file(entry.path());
+                    if (!file.is_open())
                     {
-                        key = fileToKeyMap[filename];
+                        continue;
                     }
-                    else
+
+                    std::string line;
+                    while (std::getline(file, line))
                     {
-                        // For unknown keys, just use the file prefix
-                        key = filePrefix;
-                    }
-                }
-                else
-                {
-                    // Not a valid key file
-                    continue;
-                }
-
-                // Read the file content
-                std::ifstream file(entry.path());
-                if (!file.is_open())
-                {
-                    continue;
-                }
-
-                // Read file contents
-                std::string value;
-                file.seekg(0, std::ios::end);
-                size_t fileSize = file.tellg();
-                value.reserve(fileSize);
-                file.seekg(0, std::ios::beg);
-                value.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-                file.close();
-
-                // Store in map
-                m_keyValueStore[key] = value;
-
-                // If this is a metrics list, load the metrics
-                if (key == "ts:metrics" && !value.empty())
-                {
-                    std::stringstream ss(value);
-                    std::string metric;
-                    while (std::getline(ss, metric, ','))
-                    {
-                        if (!metric.empty())
+                        if (!line.empty())
                         {
-                            m_metrics.insert(metric);
+                            m_metrics.insert(line);
                         }
                     }
+                    file.close();
+                }
+                else if (filename.substr(0, 3) == "ts_")
+                {
+                    std::string metric = filename.substr(3, filename.length() - 6);
+
+                    // Load the time series data
+                    std::ifstream file(entry.path());
+                    if (!file.is_open())
+                    {
+                        continue;
+                    }
+
+                    std::string content;
+                    file.seekg(0, std::ios::end);
+                    size_t fileSize = file.tellg();
+                    content.reserve(fileSize);
+                    file.seekg(0, std::ios::beg);
+                    content.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                    file.close();
+
+                    // Store the time series data
+                    m_timeSeriesStore[filename.substr(0, filename.length() - 3)] = content;
                 }
             }
         }
@@ -357,7 +331,7 @@ const std::unique_ptr<IDatabase> EmbeddedDatabase::Impl::load(std::string dbname
 {
     std::string basedir(".waffledb");
     std::string dbfolder(basedir + "/" + dbname);
-    return (std::make_unique<EmbeddedDatabase::Impl>(dbname, dbfolder));
+    return std::make_unique<EmbeddedDatabase::Impl>(dbname, dbfolder);
 }
 
 void EmbeddedDatabase::Impl::destroy()
@@ -367,55 +341,54 @@ void EmbeddedDatabase::Impl::destroy()
         fs::remove_all(m_fullpath);
     }
 
-    m_keyValueStore.clear();
+    m_timeSeriesStore.clear();
     m_metrics.clear();
 }
-
-// Key value operations
 
 std::string EmbeddedDatabase::Impl::getDirectory()
 {
     return m_fullpath;
 }
 
-void EmbeddedDatabase::Impl::setKeyValue(std::string key, std::string value)
+void EmbeddedDatabase::Impl::saveTimeSeries(const std::string &seriesKey, const std::string &serializedData)
 {
     try
     {
-        // Sanitize key for filename
-        std::string safeKey = sanitizeKeyForFilename(key);
-        std::string filePath = m_fullpath + "/" + safeKey + "_string.kv";
+        std::string safeKey = sanitizeKeyForFilename(seriesKey);
+        std::string filePath = m_fullpath + "/" + safeKey + ".ts";
         std::ofstream os(filePath, std::ios::out | std::ios::trunc);
         if (!os.is_open())
         {
             return;
         }
 
-        os << value;
+        os << serializedData;
         os.close();
 
         // Update in-memory map
-        m_keyValueStore[key] = value;
+        m_timeSeriesStore[safeKey] = serializedData;
     }
     catch (const std::exception &e)
     {
-        std::cout << "Exception during setKeyValue: " << e.what() << std::endl;
+        std::cout << "Exception during saveTimeSeries: " << e.what() << std::endl;
     }
 }
 
-std::string EmbeddedDatabase::Impl::getKeyValue(std::string key)
+std::string EmbeddedDatabase::Impl::loadTimeSeries(const std::string &seriesKey)
 {
-    const auto &mapEntry = m_keyValueStore.find(key);
-    if (mapEntry != m_keyValueStore.end())
+    std::string safeKey = sanitizeKeyForFilename(seriesKey);
+
+    // Check if already loaded in memory
+    auto it = m_timeSeriesStore.find(safeKey);
+    if (it != m_timeSeriesStore.end())
     {
-        return mapEntry->second;
+        return it->second;
     }
 
-    // If not found in memory, try to read from disk
+    // Not in memory, try to load from disk
     try
     {
-        std::string safeKey = sanitizeKeyForFilename(key);
-        std::string filePath = m_fullpath + "/" + safeKey + "_string.kv";
+        std::string filePath = m_fullpath + "/" + safeKey + ".ts";
 
         std::ifstream file(filePath);
         if (!file.is_open())
@@ -432,11 +405,12 @@ std::string EmbeddedDatabase::Impl::getKeyValue(std::string key)
         file.close();
 
         // Update the in-memory map
-        m_keyValueStore[key] = fileContent;
+        m_timeSeriesStore[safeKey] = fileContent;
         return fileContent;
     }
     catch (const std::exception &e)
     {
+        std::cout << "Exception during loading data: " << e.what() << std::endl;
         return "";
     }
 }
@@ -445,20 +419,25 @@ std::string EmbeddedDatabase::Impl::getKeyValue(std::string key)
 
 void EmbeddedDatabase::Impl::saveMetrics()
 {
-    std::stringstream ss;
-    bool first = true;
-
-    for (const auto &metric : m_metrics)
+    try
     {
-        if (!first)
+        std::string filePath = m_fullpath + "/metrics.ts";
+        std::ofstream os(filePath, std::ios::out | std::ios::trunc);
+        if (!os.is_open())
         {
-            ss << ",";
+            return;
         }
-        ss << metric;
-        first = false;
-    }
 
-    setKeyValue("ts:metrics", ss.str());
+        for (const auto &metric : m_metrics)
+        {
+            os << metric << std::endl;
+        }
+        os.close();
+    }
+    catch (const std::exception &e)
+    {
+        std::cout << "Exception during saveMetrics: " << e.what() << std::endl;
+    }
 }
 
 void EmbeddedDatabase::Impl::write(const TimePoint &point)
@@ -474,7 +453,7 @@ void EmbeddedDatabase::Impl::write(const TimePoint &point)
     std::string seriesKey = createSeriesKey(point.metric, point.tags);
 
     // Load existing series if any
-    std::string seriesStr = getKeyValue(seriesKey);
+    std::string seriesStr = loadTimeSeries(seriesKey);
     TimeSeries series;
 
     if (!seriesStr.empty())
@@ -487,7 +466,6 @@ void EmbeddedDatabase::Impl::write(const TimePoint &point)
         series.tags = point.tags;
     }
 
-    // Find insert position (maintain sorted order by timestamp)
     auto it = std::lower_bound(series.timestamps.begin(), series.timestamps.end(), point.timestamp);
     size_t pos = it - series.timestamps.begin();
 
@@ -497,7 +475,7 @@ void EmbeddedDatabase::Impl::write(const TimePoint &point)
 
     // Serialize and save updated series
     std::string serialized = serializeTimeSeries(series);
-    setKeyValue(seriesKey, serialized);
+    saveTimeSeries(seriesKey, serialized);
 }
 
 void EmbeddedDatabase::Impl::writeBatch(const std::vector<TimePoint> &points)
@@ -530,7 +508,7 @@ void EmbeddedDatabase::Impl::writeBatch(const std::vector<TimePoint> &points)
             continue;
 
         // Load existing series if any
-        std::string seriesStr = getKeyValue(seriesKey);
+        std::string seriesStr = loadTimeSeries(seriesKey);
         TimeSeries series;
 
         if (!seriesStr.empty())
@@ -546,7 +524,6 @@ void EmbeddedDatabase::Impl::writeBatch(const std::vector<TimePoint> &points)
         // Add all points
         for (const auto &point : seriesPointsVec)
         {
-            // Find insert position (maintain sorted order by timestamp)
             auto it = std::lower_bound(series.timestamps.begin(), series.timestamps.end(), point.timestamp);
             size_t pos = it - series.timestamps.begin();
 
@@ -556,7 +533,7 @@ void EmbeddedDatabase::Impl::writeBatch(const std::vector<TimePoint> &points)
         }
 
         // Save updated series
-        setKeyValue(seriesKey, serializeTimeSeries(series));
+        saveTimeSeries(seriesKey, serializeTimeSeries(series));
     }
 }
 
@@ -574,35 +551,23 @@ std::vector<TimePoint> EmbeddedDatabase::Impl::query(
         return results;
     }
 
-    // Match by prefix instead of exact keys
+    // Match by prefix
     std::string metricPrefix = "ts:" + metric;
+    std::string metricPrefixUnderscored = "ts_" + metric;
 
-    for (const auto &pair : m_keyValueStore)
+    for (const auto &pair : m_timeSeriesStore)
     {
-        // Try matching with two formats: with colon and with underscore
         if (pair.first.find(metricPrefix) == 0 ||
-            pair.first.find("ts_" + metric) == 0)
+            pair.first.find(metricPrefixUnderscored) == 0)
         {
-            // If tags are specified, check if they match
             if (!tags.empty())
             {
-                // Deserialize this series to check its tags
                 TimeSeries series = deserializeTimeSeries(pair.second, metric);
-                bool tagsMatch = true;
+                bool matches = tagsMatch(tags, series.tags);
 
-                for (const auto &tagPair : tags)
+                if (!matches)
                 {
-                    auto it = series.tags.find(tagPair.first);
-                    if (it == series.tags.end() || it->second != tagPair.second)
-                    {
-                        tagsMatch = false;
-                        break;
-                    }
-                }
-
-                if (!tagsMatch)
-                {
-                    continue; // Skip this series if tags don't match
+                    continue;
                 }
             }
 
@@ -643,7 +608,6 @@ double EmbeddedDatabase::Impl::avg(
     uint64_t end_time,
     const std::unordered_map<std::string, std::string> &tags)
 {
-
     std::vector<TimePoint> points = query(metric, start_time, end_time, tags);
 
     if (points.empty())
@@ -666,7 +630,6 @@ double EmbeddedDatabase::Impl::sum(
     uint64_t end_time,
     const std::unordered_map<std::string, std::string> &tags)
 {
-
     std::vector<TimePoint> points = query(metric, start_time, end_time, tags);
 
     double sum = 0.0;
@@ -684,7 +647,6 @@ double EmbeddedDatabase::Impl::min(
     uint64_t end_time,
     const std::unordered_map<std::string, std::string> &tags)
 {
-
     std::vector<TimePoint> points = query(metric, start_time, end_time, tags);
 
     if (points.empty())
@@ -707,7 +669,6 @@ double EmbeddedDatabase::Impl::max(
     uint64_t end_time,
     const std::unordered_map<std::string, std::string> &tags)
 {
-
     std::vector<TimePoint> points = query(metric, start_time, end_time, tags);
 
     if (points.empty())
@@ -729,14 +690,53 @@ std::vector<std::string> EmbeddedDatabase::Impl::getMetrics()
     return std::vector<std::string>(m_metrics.begin(), m_metrics.end());
 }
 
+// Delete all data related to that metric (Seems problematic at the moment)
+// What if we have sth like below
+// time | wind speed | humidity
+// delete wind speed metric would lead to delete entire as the code is showing below
 void EmbeddedDatabase::Impl::deleteMetric(const std::string &metric)
 {
     // Remove from metrics set
     m_metrics.erase(metric);
     saveMetrics();
 
-    // In a real implementation, we would use a prefix scan to delete all series
-    // For this implementation, we'll leave the data in the KV store
+    // Find and remove all files related to this metric
+    std::string metricPrefix = "ts_" + metric;
+
+    // Delete from memory
+    auto it = m_timeSeriesStore.begin();
+    while (it != m_timeSeriesStore.end())
+    {
+        if (it->first.find(metricPrefix) == 0)
+        {
+            it = m_timeSeriesStore.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    // Delete from disk
+    try
+    {
+        for (const auto &entry : fs::directory_iterator(m_fullpath))
+        {
+            if (entry.is_regular_file() && entry.path().extension() == ".ts")
+            {
+                std::string filename = entry.path().filename().string();
+
+                if (filename.find(metricPrefix) == 0)
+                {
+                    fs::remove(entry.path());
+                }
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        std::cout << "Exception during deleteMetric: " << e.what() << std::endl;
+    }
 }
 
 // High Level Database Client API
@@ -756,32 +756,23 @@ const std::unique_ptr<IDatabase> EmbeddedDatabase::createEmpty(std::string dbnam
 {
     return EmbeddedDatabase::Impl::createEmpty(dbname);
 }
+
 const std::unique_ptr<IDatabase> EmbeddedDatabase::load(std::string dbname)
 {
     return EmbeddedDatabase::Impl::load(dbname);
 }
+
 void EmbeddedDatabase::destroy()
 {
     mImpl->destroy();
 }
 
-// Key-value operations
+// Operations
 std::string EmbeddedDatabase::getDirectory()
 {
     return mImpl->getDirectory();
 }
 
-void EmbeddedDatabase::setKeyValue(std::string key, std::string value)
-{
-    mImpl->setKeyValue(key, value);
-}
-
-std::string EmbeddedDatabase::getKeyValue(std::string key)
-{
-    return mImpl->getKeyValue(key);
-}
-
-// Time Series operations
 void EmbeddedDatabase::write(const TimePoint &point)
 {
     mImpl->write(point);

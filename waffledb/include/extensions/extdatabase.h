@@ -14,8 +14,6 @@ namespace waffledbext
 
         ~EmbeddedDatabase();
         std::string getDirectory(void);
-        void setKeyValue(std::string key, std::string value);
-        std::string getKeyValue(std::string key);
 
         void write(const TimePoint &point);
 

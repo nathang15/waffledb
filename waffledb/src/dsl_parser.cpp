@@ -279,7 +279,13 @@ namespace waffledb
 
         std::string value = input_.substr(startPos, position_ - startPos);
 
-        // Check for keywords
+        // Convert to lowercase for keyword comparison
+        std::string lowerValue = value;
+        std::transform(lowerValue.begin(), lowerValue.end(), lowerValue.begin(),
+                       [](char c)
+                       { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
+
+        // Check for keywords (now case-insensitive)
         static const std::unordered_map<std::string, TokenType> keywords = {
             {"select", TokenType::SELECT},
             {"from", TokenType::FROM},
@@ -301,10 +307,10 @@ namespace waffledb
             {"or", TokenType::OR},
             {"not", TokenType::NOT}};
 
-        auto it = keywords.find(value);
+        auto it = keywords.find(lowerValue);
         if (it != keywords.end())
         {
-            return {it->second, value, line_, startCol};
+            return {it->second, value, line_, startCol}; // Return original case but use lowercase for lookup
         }
 
         return {TokenType::IDENTIFIER, value, line_, startCol};
@@ -1013,7 +1019,7 @@ namespace waffledb
                 return 0.0;
 
             double valueDiff = points.back().value - points.front().value;
-            double timeDiff = points.back().timestamp - points.front().timestamp;
+            double timeDiff = static_cast<double>(points.back().timestamp - points.front().timestamp);
 
             return timeDiff > 0 ? valueDiff / timeDiff : 0.0;
         }
@@ -1023,12 +1029,11 @@ namespace waffledb
             if (points.size() < 2)
                 return 0.0;
 
-            // Simple derivative: (y2 - y1) / (t2 - t1)
             const auto &p1 = points[points.size() - 2];
             const auto &p2 = points[points.size() - 1];
 
             double valueDiff = p2.value - p1.value;
-            double timeDiff = p2.timestamp - p1.timestamp;
+            double timeDiff = static_cast<double>(p2.timestamp - p1.timestamp);
 
             return timeDiff > 0 ? valueDiff / timeDiff : 0.0;
         }

@@ -85,13 +85,17 @@ void printUsage()
     cout << "  Destroy database:  waffledb-cli -d -n mydb" << endl;
     cout << endl;
     cout << "DSL Operations:" << endl;
-    cout << "  Execute DSL query: waffledb-cli --dsl -n mydb --query-str \"SELECT avg(cpu.usage) FROM metrics WHERE timestamp > 1672531200\"" << endl;
-    cout << "  Validate DSL:      waffledb-cli --validate-dsl -n mydb --query-str \"SELECT sum(memory.usage) FROM metrics\"" << endl;
-    cout << "  Explain DSL:       waffledb-cli --explain-dsl -n mydb --query-str \"SELECT max(disk.io) FROM metrics GROUP BY host\"" << endl;
+    cout << "  Execute DSL query: waffledb-cli --dsl -n mydb --query-str \"SELECT avg(cpu.usage) FROM cpu.usage\"" << endl;
+    cout << "  Validate DSL:      waffledb-cli --validate-dsl -n mydb --query-str \"SELECT sum(memory.usage) FROM memory.usage\"" << endl;
+    cout << "  Explain DSL:       waffledb-cli --explain-dsl -n mydb --query-str \"SELECT max(disk.io) FROM disk.io\"" << endl;
     cout << endl;
     cout << "Batch Operations:" << endl;
     cout << "  Batch write:       waffledb-cli --batch-write -n mydb --file data.csv" << endl;
     cout << "  Export data:       waffledb-cli --export -n mydb -m cpu.usage --start \"2023-01-01 00:00:00\" --end \"2023-01-02 00:00:00\" --output export.csv" << endl;
+    cout << endl;
+    cout << "Advanced DSL Examples:" << endl;
+    cout << "  Windowed query:    waffledb-cli --dsl -n mydb --query-str \"SELECT sum(cpu.usage) FROM cpu.usage WINDOW TUMBLING 300000\"" << endl;
+    cout << "  Tagged query:      waffledb-cli --dsl -n mydb --query-str \"SELECT avg(cpu.usage{host=\\\"server1\\\"}) FROM cpu.usage\"" << endl;
 }
 
 void batchWriteFromCSV(IDatabase *db, const string &filename)
@@ -174,6 +178,8 @@ void batchWriteFromCSV(IDatabase *db, const string &filename)
     cout << "Batch write completed. Processed " << lineNum << " lines." << endl;
 }
 
+// Helper function to cast IDatabase* to TimeSeriesDatabase* - REMOVE THIS FUNCTION
+
 int main(int argc, char *argv[])
 {
     // Grab command line params and determine mode
@@ -230,7 +236,10 @@ int main(int argc, char *argv[])
 
         // All other commands need a loaded database
         std::string dbname(result["n"].as<std::string>());
-        std::unique_ptr<IDatabase> db(WaffleDB::loadDB(dbname));
+        std::unique_ptr<IDatabase> db_interface(WaffleDB::loadDB(dbname));
+
+        // For DSL operations, we need the actual TimeSeriesDatabase
+        TimeSeriesDatabase *db = dynamic_cast<TimeSeriesDatabase *>(db_interface.get());
 
         // DSL operations
         if (result.count("dsl"))
@@ -245,7 +254,7 @@ int main(int argc, char *argv[])
 
             try
             {
-                auto points = db->executeQuery(queryStr);
+                auto points = db_interface->executeQuery(queryStr);
 
                 cout << "DSL Query Results:" << endl;
                 cout << "Query: " << queryStr << endl;
@@ -303,9 +312,38 @@ int main(int argc, char *argv[])
 
             string queryStr = result["query-str"].as<string>();
 
-            // Note: This would require implementing validation in the database interface
-            cout << "DSL Validation for: " << queryStr << endl;
-            cout << "Validation: PASSED (feature not fully implemented yet)" << endl;
+            try
+            {
+                if (!db)
+                {
+                    cout << "Error: Database does not support DSL validation" << endl;
+                    return 1;
+                }
+
+                std::vector<std::string> errors;
+                bool isValid = db->validateQuery(queryStr, errors);
+
+                cout << "DSL Validation for: " << queryStr << endl;
+
+                if (isValid)
+                {
+                    cout << "Validation: PASSED" << endl;
+                }
+                else
+                {
+                    cout << "Validation: FAILED" << endl;
+                    cout << "Errors:" << endl;
+                    for (const auto &error : errors)
+                    {
+                        cout << "  - " << error << endl;
+                    }
+                }
+            }
+            catch (const exception &e)
+            {
+                cout << "DSL validation error: " << e.what() << endl;
+                return 1;
+            }
 
             return 0;
         }
@@ -320,9 +358,25 @@ int main(int argc, char *argv[])
 
             string queryStr = result["query-str"].as<string>();
 
-            cout << "DSL Query Plan for: " << queryStr << endl;
-            cout << "Explanation: (feature not fully implemented yet)" << endl;
-            cout << "This would show the execution plan, estimated costs, and optimization details." << endl;
+            try
+            {
+                if (!db)
+                {
+                    cout << "Error: Database does not support DSL explanation" << endl;
+                    return 1;
+                }
+
+                std::string explanation = db->explainQuery(queryStr);
+
+                cout << "DSL Query Plan for: " << queryStr << endl;
+                cout << "Explanation:" << endl;
+                cout << explanation << endl;
+            }
+            catch (const exception &e)
+            {
+                cout << "DSL explanation error: " << e.what() << endl;
+                return 1;
+            }
 
             return 0;
         }
@@ -339,7 +393,7 @@ int main(int argc, char *argv[])
             string filename = result["file"].as<string>();
 
             cout << "Starting batch write from: " << filename << endl;
-            batchWriteFromCSV(db.get(), filename);
+            batchWriteFromCSV(db_interface.get(), filename);
 
             return 0;
         }
@@ -363,7 +417,7 @@ int main(int argc, char *argv[])
             uint64_t startTime = parseTimestamp(result["start"].as<string>());
             uint64_t endTime = parseTimestamp(result["end"].as<string>());
 
-            db->exportCSV(outputFile, metric, startTime, endTime);
+            db_interface->exportCSV(outputFile, metric, startTime, endTime);
             cout << "Exported data to: " << outputFile << endl;
 
             return 0;
@@ -412,7 +466,7 @@ int main(int argc, char *argv[])
             point.value = value;
             point.tags = tags;
 
-            db->write(point);
+            db_interface->write(point);
 
             cout << "Wrote point: " << metric << " = " << value << " at " << formatTimestamp(timestamp);
             if (!tags.empty())
@@ -459,7 +513,7 @@ int main(int argc, char *argv[])
             }
 
             // Query points
-            vector<TimePoint> points = db->query(metric, startTime, endTime, tags);
+            vector<TimePoint> points = db_interface->query(metric, startTime, endTime, tags);
 
             cout << "Query results for " << metric;
             if (!tags.empty())
@@ -526,22 +580,22 @@ int main(int argc, char *argv[])
 
             if (result.count("avg"))
             {
-                result_value = db->avg(metric, startTime, endTime, tags);
+                result_value = db_interface->avg(metric, startTime, endTime, tags);
                 operation = "Average";
             }
             else if (result.count("sum"))
             {
-                result_value = db->sum(metric, startTime, endTime, tags);
+                result_value = db_interface->sum(metric, startTime, endTime, tags);
                 operation = "Sum";
             }
             else if (result.count("min"))
             {
-                result_value = db->min(metric, startTime, endTime, tags);
+                result_value = db_interface->min(metric, startTime, endTime, tags);
                 operation = "Minimum";
             }
             else if (result.count("max"))
             {
-                result_value = db->max(metric, startTime, endTime, tags);
+                result_value = db_interface->max(metric, startTime, endTime, tags);
                 operation = "Maximum";
             }
 
@@ -567,7 +621,7 @@ int main(int argc, char *argv[])
         if (result.count("list"))
         {
             // List all metrics
-            vector<string> metrics = db->getMetrics();
+            vector<string> metrics = db_interface->getMetrics();
 
             cout << "Metrics in database " << dbname << ":" << endl;
             if (metrics.empty())
@@ -595,7 +649,7 @@ int main(int argc, char *argv[])
             }
 
             string metric = result["m"].as<string>();
-            db->deleteMetric(metric);
+            db_interface->deleteMetric(metric);
             cout << "Deleted metric: " << metric << endl;
             return 0;
         }

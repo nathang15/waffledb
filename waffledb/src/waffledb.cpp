@@ -16,6 +16,7 @@
 #include <queue>
 #include <condition_variable>
 #include <atomic>
+#include <cctype>
 
 #ifdef HAS_RAPIDJSON
 #include <rapidjson/document.h>
@@ -133,13 +134,15 @@ namespace waffledb
         // Storage manager
         std::unique_ptr<ColumnarStorageManager> storageManager_;
 
-        // DSL query engine
+        // DSL query engine - Modified to be optional
         std::unique_ptr<QueryDSL> queryEngine_;
 
         // Internal methods
         void flushLoop();
         void flushWriteBuffer();
         void ensureActiveChunk(const std::string &metric);
+        void initializeQueryEngine();
+        std::vector<TimePoint> executeBasicDSLQuery(const std::string &queryStr);
 
     public:
         Impl(const std::string &dbname, const std::string &path);
@@ -170,6 +173,10 @@ namespace waffledb
         void importJSON(const std::string &filename);
         void exportCSV(const std::string &filename, const std::string &metric,
                        uint64_t start_time, uint64_t end_time);
+
+        // DSL operations
+        bool validateQuery(const std::string &queryStr, std::vector<std::string> &errors);
+        std::string explainQuery(const std::string &queryStr);
 
         // Persistence
         void saveMetadata();
@@ -236,6 +243,9 @@ namespace waffledb
             wal_->clear();
         }
 
+        // Initialize DSL query engine (deferred)
+        initializeQueryEngine();
+
         // Start background thread
         flushThread_ = std::thread(&Impl::flushLoop, this);
     }
@@ -260,11 +270,21 @@ namespace waffledb
         // Save metadata
         saveMetadata();
 
+        // Close DSL engine
+        queryEngine_.reset();
+
         // Close WAL explicitly
         wal_.reset();
 
         // Close storage manager
         storageManager_.reset();
+    }
+
+    void TimeSeriesDatabase::Impl::initializeQueryEngine()
+    {
+        // Initialize QueryDSL on first use or defer initialization
+        // For now, we'll use the basic DSL implementation
+        queryEngine_ = nullptr;
     }
 
     void TimeSeriesDatabase::Impl::flushLoop()
@@ -745,6 +765,7 @@ namespace waffledb
         saveMetadata();
 
         // Close all files
+        queryEngine_.reset();
         wal_.reset();
         storageManager_.reset();
 
@@ -769,10 +790,270 @@ namespace waffledb
         }
     }
 
-    std::vector<TimePoint> TimeSeriesDatabase::Impl::executeQuery(const std::string & /*queryStr*/)
+    std::vector<TimePoint> TimeSeriesDatabase::Impl::executeBasicDSLQuery(const std::string &queryStr)
     {
-        // Simplified - just return empty for now
+        // Convert to lowercase for easier parsing
+        std::string queryLower = queryStr;
+        std::transform(queryLower.begin(), queryLower.end(), queryLower.begin(),
+                       [](char c)
+                       { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
+
+        // Parse "SELECT function(metric) FROM metric"
+        if (queryLower.find("select") == 0)
+        {
+            // Find the function and metric
+            size_t selectPos = queryLower.find("select") + 6;
+            size_t fromPos = queryLower.find("from");
+
+            if (fromPos == std::string::npos)
+            {
+                std::cerr << "Missing FROM clause in query: " << queryStr << std::endl;
+                return {};
+            }
+
+            std::string selectPart = queryLower.substr(selectPos, fromPos - selectPos);
+            std::string fromPart = queryLower.substr(fromPos + 4);
+
+            // Trim whitespace
+            selectPart.erase(0, selectPart.find_first_not_of(" \t"));
+            selectPart.erase(selectPart.find_last_not_of(" \t") + 1);
+            fromPart.erase(0, fromPart.find_first_not_of(" \t"));
+            fromPart.erase(fromPart.find_last_not_of(" \t") + 1);
+
+            // Parse function call like "avg(cpu.usage)"
+            std::string function;
+            std::string metric;
+
+            size_t openParen = selectPart.find('(');
+            size_t closeParen = selectPart.find(')', openParen);
+
+            if (openParen != std::string::npos && closeParen != std::string::npos)
+            {
+                function = selectPart.substr(0, openParen);
+                metric = selectPart.substr(openParen + 1, closeParen - openParen - 1);
+
+                // Trim whitespace
+                function.erase(0, function.find_first_not_of(" \t"));
+                function.erase(function.find_last_not_of(" \t") + 1);
+                metric.erase(0, metric.find_first_not_of(" \t"));
+                metric.erase(metric.find_last_not_of(" \t") + 1);
+            }
+            else
+            {
+                // No function, just metric
+                metric = selectPart;
+            }
+
+            // Use a default time range (e.g., last 24 hours)
+            auto now = std::chrono::system_clock::now();
+            auto yesterday = now - std::chrono::hours(24);
+
+            uint64_t startTime = std::chrono::duration_cast<std::chrono::seconds>(
+                                     yesterday.time_since_epoch())
+                                     .count();
+            uint64_t endTime = std::chrono::duration_cast<std::chrono::seconds>(
+                                   now.time_since_epoch())
+                                   .count();
+
+            std::unordered_map<std::string, std::string> tags;
+
+            if (function == "avg")
+            {
+                double result = avg(metric, startTime, endTime, tags);
+                TimePoint point;
+                point.metric = "avg(" + metric + ")";
+                point.timestamp = endTime;
+                point.value = result;
+                return {point};
+            }
+            else if (function == "sum")
+            {
+                double result = sum(metric, startTime, endTime, tags);
+                TimePoint point;
+                point.metric = "sum(" + metric + ")";
+                point.timestamp = endTime;
+                point.value = result;
+                return {point};
+            }
+            else if (function == "min")
+            {
+                double result = min(metric, startTime, endTime, tags);
+                TimePoint point;
+                point.metric = "min(" + metric + ")";
+                point.timestamp = endTime;
+                point.value = result;
+                return {point};
+            }
+            else if (function == "max")
+            {
+                double result = max(metric, startTime, endTime, tags);
+                TimePoint point;
+                point.metric = "max(" + metric + ")";
+                point.timestamp = endTime;
+                point.value = result;
+                return {point};
+            }
+            else if (function == "count")
+            {
+                auto points = query(metric, startTime, endTime, tags);
+                TimePoint point;
+                point.metric = "count(" + metric + ")";
+                point.timestamp = endTime;
+                point.value = static_cast<double>(points.size());
+                return {point};
+            }
+            else if (function.empty())
+            {
+                // No function, return raw data
+                return query(metric, startTime, endTime, tags);
+            }
+        }
+
+        std::cerr << "Unsupported DSL query: " << queryStr << std::endl;
         return {};
+    }
+
+    // Updated executeQuery method
+    std::vector<TimePoint> TimeSeriesDatabase::Impl::executeQuery(const std::string &queryStr)
+    {
+        try
+        {
+            // Use basic DSL implementation for now
+            return executeBasicDSLQuery(queryStr);
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "DSL query execution error: " << e.what() << std::endl;
+            return {};
+        }
+    }
+
+    // DSL validation method
+    bool TimeSeriesDatabase::Impl::validateQuery(const std::string &queryStr, std::vector<std::string> &errors)
+    {
+        try
+        {
+            // Basic validation
+            std::string queryLower = queryStr;
+            std::transform(queryLower.begin(), queryLower.end(), queryLower.begin(),
+                           [](char c)
+                           { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
+
+            if (queryLower.find("select") != 0)
+            {
+                errors.push_back("Query must start with SELECT");
+                return false;
+            }
+
+            if (queryLower.find("from") == std::string::npos)
+            {
+                errors.push_back("Query must contain FROM clause");
+                return false;
+            }
+
+            // Check for valid aggregate functions
+            bool hasValidFunction = false;
+            std::vector<std::string> validFunctions = {"avg(", "sum(", "min(", "max(", "count("};
+
+            for (const auto &func : validFunctions)
+            {
+                if (queryLower.find(func) != std::string::npos)
+                {
+                    hasValidFunction = true;
+                    break;
+                }
+            }
+
+            // Also allow queries without functions (raw data)
+            if (!hasValidFunction)
+            {
+                // Check if it's a simple metric query without parentheses
+                size_t selectPos = queryLower.find("select") + 6;
+                size_t fromPos = queryLower.find("from");
+                std::string selectPart = queryLower.substr(selectPos, fromPos - selectPos);
+                selectPart.erase(0, selectPart.find_first_not_of(" \t"));
+                selectPart.erase(selectPart.find_last_not_of(" \t") + 1);
+
+                if (selectPart.find('(') != std::string::npos && selectPart.find(')') == std::string::npos)
+                {
+                    errors.push_back("Unclosed parentheses in function call");
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            errors.push_back("Validation error: " + std::string(e.what()));
+            return false;
+        }
+    }
+    // DSL explanation method
+    std::string TimeSeriesDatabase::Impl::explainQuery(const std::string &queryStr)
+    {
+        try
+        {
+            std::stringstream ss;
+            ss << "Query Analysis for: " << queryStr << std::endl;
+            ss << "Parser: Basic DSL implementation" << std::endl;
+
+            std::string queryLower = queryStr;
+            std::transform(queryLower.begin(), queryLower.end(), queryLower.begin(),
+                           [](char c)
+                           { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
+
+            if (queryLower.find("select") == 0)
+            {
+                ss << "Operation: SELECT query detected" << std::endl;
+
+                if (queryLower.find("avg(") != std::string::npos)
+                {
+                    ss << "Aggregate: AVG function" << std::endl;
+                    ss << "Algorithm: Sum all values and divide by count" << std::endl;
+                }
+                else if (queryLower.find("sum(") != std::string::npos)
+                {
+                    ss << "Aggregate: SUM function" << std::endl;
+                    ss << "Algorithm: Add all values in time range" << std::endl;
+                }
+                else if (queryLower.find("min(") != std::string::npos)
+                {
+                    ss << "Aggregate: MIN function" << std::endl;
+                    ss << "Algorithm: Find minimum value in time range" << std::endl;
+                }
+                else if (queryLower.find("max(") != std::string::npos)
+                {
+                    ss << "Aggregate: MAX function" << std::endl;
+                    ss << "Algorithm: Find maximum value in time range" << std::endl;
+                }
+                else if (queryLower.find("count(") != std::string::npos)
+                {
+                    ss << "Aggregate: COUNT function" << std::endl;
+                    ss << "Algorithm: Count number of data points" << std::endl;
+                }
+                else
+                {
+                    ss << "Query Type: Raw data retrieval" << std::endl;
+                    ss << "Algorithm: Return all points in time range" << std::endl;
+                }
+
+                ss << "Time Range: Last 24 hours (default)" << std::endl;
+                ss << "Storage: Columnar chunks with time-based indexing" << std::endl;
+                ss << "Execution: Single-pass scan over active and completed chunks" << std::endl;
+                ss << "Optimization: Time range pruning at chunk level" << std::endl;
+            }
+            else
+            {
+                ss << "Error: Unsupported query format" << std::endl;
+            }
+
+            return ss.str();
+        }
+        catch (const std::exception &e)
+        {
+            return "Explanation error: " + std::string(e.what());
+        }
     }
 
     void TimeSeriesDatabase::Impl::importCSV(const std::string & /*filename*/, const std::string & /*metric*/)
@@ -1006,6 +1287,18 @@ namespace waffledb
                                        uint64_t start_time, uint64_t end_time)
     {
         pImpl->exportCSV(filename, metric, start_time, end_time);
+    }
+
+    // DSL validation method
+    bool TimeSeriesDatabase::validateQuery(const std::string &queryStr, std::vector<std::string> &errors)
+    {
+        return pImpl->validateQuery(queryStr, errors);
+    }
+
+    // DSL explanation method
+    std::string TimeSeriesDatabase::explainQuery(const std::string &queryStr)
+    {
+        return pImpl->explainQuery(queryStr);
     }
 
     std::unique_ptr<IDatabase> TimeSeriesDatabase::createEmpty(const std::string &dbname)

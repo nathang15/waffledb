@@ -33,6 +33,11 @@ namespace waffledbext
 
         void deleteMetric(const std::string &metric);
 
+        std::vector<waffledb::TimePoint> executeQuery(const std::string &query) override;
+        void importCSV(const std::string &filename, const std::string &metric) override;
+        void importJSON(const std::string &filename) override;
+        void exportCSV(const std::string &filename, const std::string &metric,
+                       uint64_t start_time, uint64_t end_time) override;
         // management functions
         static const std::unique_ptr<IDatabase> createEmpty(std::string dbname);
         static const std::unique_ptr<IDatabase> load(std::string dbname);

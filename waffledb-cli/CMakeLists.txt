@@ -6,7 +6,7 @@ target_link_libraries(waffledb-cli PRIVATE waffledb)
 
 target_compile_features(waffledb-cli PRIVATE cxx_std_17)
 
-include_directories(${groundupdb_SOURCE_DIR})
+target_include_directories(waffledb-cli PRIVATE ${waffledb_SOURCE_DIR}/waffledb/include)
 
 install(TARGETS waffledb-cli
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} 

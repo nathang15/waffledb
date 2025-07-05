@@ -6,7 +6,7 @@ add_executable(waffledb-tests
 	#performance-tests.cpp
 )
 
-include_directories(${waffledb_SOURCE_DIR})
+target_include_directories(waffledb-tests PRIVATE ${waffledb_SOURCE_DIR}/waffledb/include)
 
 target_link_libraries(waffledb-tests PRIVATE waffledb)
 
